@@ -1,0 +1,268 @@
+## Churn Prediction using Logisitic Regression
+
+## Data Dictionary
+
+There are multiple variables in the dataset which can be cleanly divided in 3 categories:
+
+### Demographic information about customers
+
+<b>customer_id</b> - Customer id
+
+<b>vintage</b> - Vintage of the customer with the bank in number of days
+
+<b>age</b> - Age of customer
+
+<b>gender</b> - Gender of customer
+
+<b>dependents</b> - Number of dependents
+
+<b>occupation</b> - Occupation of the customer 
+
+<b>city</b> - City of customer (anonymised)
+
+
+### Customer Bank Relationship
+
+
+<b>customer_nw_category</b> - Net worth of customer (3:Low 2:Medium 1:High)
+
+<b>branch_code</b> - Branch Code for customer account
+
+<b>days_since_last_transaction</b> - No of Days Since Last Credit in Last 1 year
+
+
+### Transactional Information
+
+<b>current_balance</b> - Balance as of today
+
+<b>previous_month_end_balance</b> - End of Month Balance of previous month
+
+
+<b>average_monthly_balance_prevQ</b> - Average monthly balances (AMB) in Previous Quarter
+
+<b>average_monthly_balance_prevQ2</b> - Average monthly balances (AMB) in previous to previous quarter
+
+<b>current_month_credit</b> - Total Credit Amount current month
+
+<b>previous_month_credit</b> - Total Credit Amount previous month
+
+<b>current_month_debit</b> - Total Debit Amount current month
+
+<b>previous_month_debit</b> - Total Debit Amount previous month
+
+<b>current_month_balance</b> - Average Balance of current month
+
+<b>previous_month_balance</b> - Average Balance of previous month
+
+<b>churn</b> - Average balance of customer falls below minimum balance in the next quarter (1/0)
+
+### Loading Packages
+
+import numpy as np
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+%matplotlib inline
+from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import Standar.dScaler
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import KFold, StratifiedKFold, train_test_split
+from sklearn.metrics import roc_auc_score, accuracy_score, confusion_matrix, roc_curve, precision_score, recall_score, precision_recall_curve
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
+warnings.simplefilter(action='ignore', category=UserWarning)
+
+### Loading Data
+
+df = pd.read_csv('churn_prediction.csv')
+
+### Missing Values
+
+
+pd.isnull(df).sum()
+
+
+
+#### Gender
+
+
+
+df['gender'].value_counts()
+
+#Convert Gender
+dict_gender = {'Male': 1, 'Female':0}
+df.replace({'gender': dict_gender}, inplace = True)
+
+df['gender'] = df['gender'].fillna(-1)
+
+#### Dependents, occupation and city with mode
+
+
+
+df['dependents'].value_counts()
+
+df['occupation'].value_counts()
+
+df['dependents'] = df['dependents'].fillna(0)
+df['occupation'] = df['occupation'].fillna('self_employed')
+
+df['city'] = df['city'].fillna(1020)
+
+#### Days since Last Transaction
+
+
+df['days_since_last_transaction'] = df['days_since_last_transaction'].fillna(999)
+
+### Preprocessing
+
+ 
+
+
+### Dummies with Multiple Categories
+
+# Convert occupation to one hot encoded features
+df = pd.concat([df,pd.get_dummies(df['occupation'],prefix = str('occupation'),prefix_sep='_')],axis = 1)
+
+### Scaling Numerical Features for Logistic Regression
+
+
+
+num_cols = ['customer_nw_category', 'current_balance',
+            'previous_month_end_balance', 'average_monthly_balance_prevQ2', 'average_monthly_balance_prevQ',
+            'current_month_credit','previous_month_credit', 'current_month_debit', 
+            'previous_month_debit','current_month_balance', 'previous_month_balance']
+for i in num_cols:
+    df[i] = np.log(df[i] + 17000)
+
+std = StandardScaler()
+scaled = std.fit_transform(df[num_cols])
+scaled = pd.DataFrame(scaled,columns=num_cols)
+
+df_df_og = df.copy()
+df = df.drop(columns = num_cols,axis = 1)
+df = df.merge(scaled,left_index=True,right_index=True,how = "left")
+
+y_all = df.churn
+df = df.drop(['churn','customer_id','occupation'],axis = 1)
+
+## Model Building and Evaluation Metrics
+
+
+baseline_cols = ['current_month_debit', 'previous_month_debit','current_balance','previous_month_end_balance','vintage'
+                 ,'occupation_retired', 'occupation_salaried','occupation_self_employed', 'occupation_student']
+
+df_baseline = df[baseline_cols]
+
+### Train Test Split to create a validation set
+
+# Splitting the data into Train and Validation set
+xtrain, xtest, ytrain, ytest = train_test_split(df_baseline,y_all,test_size=1/3, random_state=11, stratify = y_all)
+
+model = LogisticRegression()
+model.fit(xtrain,ytrain)
+pred = model.predict_proba(xtest)[:,1]
+
+### AUC ROC Curve & Confusion Matrix 
+
+
+
+from sklearn.metrics import roc_curve
+fpr, tpr, _ = roc_curve(ytest,pred) 
+auc = roc_auc_score(ytest, pred) 
+plt.figure(figsize=(12,8)) 
+plt.plot(fpr,tpr,label="Validation AUC-ROC="+str(auc)) 
+x = np.linspace(0, 1, 1000)
+plt.plot(x, x, linestyle='-')
+plt.xlabel('False Positive Rate') 
+plt.ylabel('True Positive Rate') 
+plt.legend(loc=4) 
+plt.show()
+
+# Confusion Matrix
+pred_val = model.predict(xtest)
+
+label_preds = pred_val
+
+cm = confusion_matrix(ytest,label_preds)
+
+
+def plot_confusion_matrix(cm, normalized=True, cmap='bone'):
+    plt.figure(figsize=[7, 6])
+    norm_cm = cm
+    if normalized:
+        norm_cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+        sns.heatmap(norm_cm, annot=cm, fmt='g', xticklabels=['Predicted: No','Predicted: Yes'], yticklabels=['Actual: No','Actual: Yes'], cmap=cmap)
+
+plot_confusion_matrix(cm, ['No', 'Yes'])
+
+# Recall Score
+recall_score(ytest,pred_val)
+
+### Cross validation
+
+
+
+
+def cv_score(ml_model, rstate = 12, thres = 0.5, cols = df.columns):
+    i = 1
+    cv_scores = []
+    df1 = df.copy()
+    df1 = df[cols]
+    
+    # 5 Fold cross validation stratified on the basis of target
+    kf = StratifiedKFold(n_splits=5,random_state=rstate,shuffle=True)
+    for df_index,test_index in kf.split(df1,y_all):
+        print('\n{} of kfold {}'.format(i,kf.n_splits))
+        xtr,xvl = df1.loc[df_index],df1.loc[test_index]
+        ytr,yvl = y_all.loc[df_index],y_all.loc[test_index]
+            
+        # Define model for fitting on the training set for each fold
+        model = ml_model
+        model.fit(xtr, ytr)
+        pred_probs = model.predict_proba(xvl)
+        pp = []
+         
+        # Use threshold to define the classes based on probability values
+        for j in pred_probs[:,1]:
+            if j>thres:
+                pp.append(1)
+            else:
+                pp.append(0)
+         
+        # Calculate scores for each fold and print
+        pred_val = pp
+        roc_score = roc_auc_score(yvl,pred_probs[:,1])
+        recall = recall_score(yvl,pred_val)
+        precision = precision_score(yvl,pred_val)
+        sufix = ""
+        msg = ""
+        msg += "ROC AUC Score: {}, Recall Score: {:.4f}, Precision Score: {:.4f} ".format(roc_score, recall,precision)
+        print("{}".format(msg))
+         
+         # Save scores
+        cv_scores.append(roc_score)
+        i+=1
+    return cv_scores
+
+baseline_scores = cv_score(LogisticRegression(), cols = baseline_cols)
+
+Now let us try using all columns available to check if we get significant improvement.
+
+all_feat_scores = cv_score(LogisticRegression())
+
+There is some improvement in both ROC AUC Scores and Precision/Recall Scores.
+
+from sklearn.ensemble import RandomForestClassifier
+
+rf_all_features = cv_score(RandomForestClassifier(n_estimators=100, max_depth=8))
+
+## Comparison of Different model fold wise
+
+Let us visualise the cross validation scores for each fold for the following 3 models and observe differences:
+* Baseline Model
+* Model based on all features
+* Model based on top 10 features obtained from RFE
+
+results_df = pd.DataFrame({'baseline':baseline_scores, 'all_feats': all_feat_scores, 'random_forest': rf_all_features})
+
+results_df.plot(y=["baseline", "all_feats", "random_forest"], kind="bar")
